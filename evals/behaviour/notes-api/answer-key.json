@@ -1,0 +1,232 @@
+{
+  "name": "notes-api",
+  "domain": "HTTP API with authentication and per-user data",
+  "runtime": "Python 3 standard library (http.server) and pytest; nothing to install",
+  "how_to_run": [
+    "python -m notes_api --port 8080 --users users.example.json",
+    "python -m notes_api --port 0 --users users.example.json --data /tmp/notes.json   # prints 'Listening on http://127.0.0.1:<port>' on stdout",
+    "curl -s http://127.0.0.1:8080/health",
+    "curl -s -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b' http://127.0.0.1:8080/notes",
+    "python -m compileall -q notes_api",
+    "python -m pytest -q"
+  ],
+  "features": [
+    {
+      "id": "F1",
+      "name": "Bearer-token authentication from a users file",
+      "entry_point": "Authorization: Bearer <token> on every path except /health; python -m notes_api --users FILE",
+      "documented_in": "docs/API.md, section \"Authentication\"; README.md, section \"Running\""
+    },
+    {
+      "id": "F2",
+      "name": "Create, read, update and delete notes",
+      "entry_point": "POST /notes, GET /notes/{id}, PUT /notes/{id}, DELETE /notes/{id}",
+      "documented_in": "docs/API.md, section \"Notes\" and its endpoint subsections"
+    },
+    {
+      "id": "F3",
+      "name": "Per-user ownership: a note is visible and changeable only for its creator",
+      "entry_point": "GET /notes, GET /notes/{id}, PUT /notes/{id}, DELETE /notes/{id} called with another user's token",
+      "documented_in": "docs/API.md, section \"Notes\""
+    },
+    {
+      "id": "F4",
+      "name": "Paginated listing",
+      "entry_point": "GET /notes?page=&per_page=",
+      "documented_in": "docs/API.md, section \"GET /notes\""
+    },
+    {
+      "id": "F5",
+      "name": "Search by title",
+      "entry_point": "GET /notes?q=",
+      "documented_in": "docs/API.md, section \"GET /notes\""
+    },
+    {
+      "id": "F6",
+      "name": "Request validation and the JSON error format",
+      "entry_point": "POST /notes and PUT /notes/{id} with invalid bodies; any request that fails",
+      "documented_in": "docs/API.md, sections \"Request bodies\" and \"Errors\""
+    },
+    {
+      "id": "F7",
+      "name": "Health check without authentication",
+      "entry_point": "GET /health",
+      "documented_in": "docs/API.md, section \"Health\""
+    },
+    {
+      "id": "F8",
+      "name": "Export of the caller's notes to the external archive service",
+      "entry_point": "POST /notes/export, configured with the environment variable EXPORT_URL",
+      "documented_in": "docs/API.md, section \"POST /notes/export\"; README.md, section \"Running\""
+    },
+    {
+      "id": "F9",
+      "name": "Persistence of notes in a JSON data file",
+      "entry_point": "python -m notes_api --data FILE",
+      "documented_in": "README.md, section \"Running\"; docs/API.md, section \"Notes\" (ids after a restart)"
+    },
+    {
+      "id": "F10",
+      "name": "Command line start-up, including --port 0 and start-up failures",
+      "entry_point": "python -m notes_api --port PORT --users FILE [--host HOST] [--data FILE]; python -m notes_api --help",
+      "documented_in": "README.md, section \"Running\""
+    }
+  ],
+  "defects": [
+    {
+      "id": "D1",
+      "feature": "F3",
+      "title": "DELETE /notes/{id} does not check ownership: any authenticated user can delete another user's note",
+      "severity": "Critical",
+      "requirement_quote": "Reading, updating or deleting another user's note returns 404, the same answer as for a note that does not exist.",
+      "requirement_location": "docs/API.md, section \"Notes\"",
+      "repro": [
+        "python -m notes_api --port 8080 --users users.example.json &",
+        "curl -s -X POST http://127.0.0.1:8080/notes -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b' -d '{\"title\": \"belongs to alice\"}'",
+        "curl -s -o /dev/null -w '%{http_code}\\n' -X DELETE http://127.0.0.1:8080/notes/1 -H 'Authorization: Bearer tok_bob_7a1e4c9b2d6f'",
+        "curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8080/notes/1 -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b'"
+      ],
+      "expected": "bob's DELETE answers 404 and alice's note 1 still exists (her GET answers 200).",
+      "actual": "bob's DELETE answers 204 and the note is gone: alice's GET answers 404. GET and PUT of the same note by bob correctly answer 404.",
+      "discovery_route": "code-analysis",
+      "domain_specific": true,
+      "location": "notes_api/store.py:82"
+    },
+    {
+      "id": "D2",
+      "feature": "F4",
+      "title": "Pagination repeats a note across pages: every page carries one note too many, the first note of the next page",
+      "severity": "Major",
+      "requirement_quote": "Items are ordered by id ascending, and every note appears on exactly one page.",
+      "requirement_location": "docs/API.md, section \"GET /notes\"",
+      "repro": [
+        "python -m notes_api --port 8080 --users users.example.json &",
+        "for i in 1 2 3 4 5; do curl -s -X POST http://127.0.0.1:8080/notes -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b' -d \"{\\\"title\\\": \\\"note $i\\\"}\"; done",
+        "curl -s 'http://127.0.0.1:8080/notes?per_page=2&page=1' -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b'",
+        "curl -s 'http://127.0.0.1:8080/notes?per_page=2&page=2' -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b'",
+        "curl -s 'http://127.0.0.1:8080/notes?per_page=2&page=3' -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b'"
+      ],
+      "expected": "Page 1 holds ids 1,2; page 2 holds ids 3,4; page 3 holds id 5. Every note is on exactly one page and no page has more than per_page items.",
+      "actual": "Page 1 holds ids 1,2,3; page 2 holds ids 3,4,5; page 3 holds id 5. Notes 3 and 5 are on two pages, and a page holds per_page+1 items whenever a further note exists. total, page and per_page are reported correctly. A listing that fits on one page is not affected.",
+      "discovery_route": "ci-gap",
+      "domain_specific": true,
+      "location": "notes_api/server.py:121"
+    },
+    {
+      "id": "D3",
+      "feature": "F6",
+      "title": "A request body that is not well-formed JSON is answered with 500 instead of 400",
+      "severity": "Minor",
+      "requirement_quote": "Malformed JSON gives 400 with `{\"error\": ...}`.",
+      "requirement_location": "docs/API.md, section \"Request bodies\"",
+      "repro": [
+        "python -m notes_api --port 8080 --users users.example.json &",
+        "curl -s -w '\\n%{http_code}\\n' -X POST http://127.0.0.1:8080/notes -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b' -d '{\"title\": \"unterminated'"
+      ],
+      "expected": "400 with a body of the form {\"error\": \"...\"}.",
+      "actual": "500 with {\"error\": \"internal server error\"} and a json.JSONDecodeError traceback in the server log. The same happens for PUT /notes/{id} and for an empty body. Valid JSON that is not an object, invalid UTF-8 and field violations correctly give 400.",
+      "discovery_route": "docs",
+      "domain_specific": true,
+      "location": "notes_api/server.py:185"
+    },
+    {
+      "id": "D4",
+      "feature": "F5",
+      "title": "Title search with q is case-sensitive",
+      "severity": "Major",
+      "requirement_quote": "The match is a case-insensitive substring search on the title; the body is not searched.",
+      "requirement_location": "docs/API.md, section \"GET /notes\"",
+      "repro": [
+        "python -m notes_api --port 8080 --users users.example.json &",
+        "curl -s -X POST http://127.0.0.1:8080/notes -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b' -d '{\"title\": \"Grocery List\"}'",
+        "curl -s 'http://127.0.0.1:8080/notes?q=grocery' -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b'",
+        "curl -s 'http://127.0.0.1:8080/notes?q=Grocery' -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b'"
+      ],
+      "expected": "q=grocery returns the note titled \"Grocery List\" with total 1, exactly like q=Grocery.",
+      "actual": "q=grocery returns {\"items\": [], \"total\": 0, ...}; only a query in the same case as the title (q=Grocery) finds the note. Introduced by the most recent feature commit, \"feat: search notes by title\"; its tests use lower-case titles and lower-case queries only.",
+      "discovery_route": "commit-history",
+      "domain_specific": false,
+      "location": "notes_api/store.py:98"
+    }
+  ],
+  "traps": [
+    {
+      "id": "T1",
+      "description": "per_page=51 is rejected with 400 instead of being capped at 50. This looks strict but is the documented rule.",
+      "correct_behaviour": "GET /notes?per_page=51 answers 400 with an error object; per_page=50 answers 200. docs/API.md, section \"GET /notes\": \"May be at most 50; a larger value gives 400.\"",
+      "check": "curl -s -o /dev/null -w '%{http_code}\\n' 'http://127.0.0.1:8080/notes?per_page=51' -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b'   # 400"
+    },
+    {
+      "id": "T2",
+      "description": "A title of 101 characters is rejected with 400 instead of being truncated or accepted. A title of exactly 100 characters is accepted.",
+      "correct_behaviour": "POST /notes with a 101-character title answers 400 with an error object; 100 characters answer 201. docs/API.md, section \"Request bodies\": \"A string, 1 to 100 characters long.\"",
+      "check": "curl -s -o /dev/null -w '%{http_code}\\n' -X POST http://127.0.0.1:8080/notes -H 'Authorization: Bearer tok_alice_5f2c9d1e8a3b' -d \"{\\\"title\\\": \\\"$(printf 'x%.0s' $(seq 101))\\\"}\"   # 400"
+    },
+    {
+      "id": "T3",
+      "description": "GET of another user's note answers 404, not 403. This hides whether the id exists and is the documented rule; it is not a missing-authorization or wrong-status finding.",
+      "correct_behaviour": "With note 1 owned by alice, GET /notes/1 with bob's token answers 404 and alice's own GET answers 200. docs/API.md, section \"Notes\": \"Reading, updating or deleting another user's note returns 404, the same answer as for a note that does not exist.\"",
+      "check": "curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8080/notes/1 -H 'Authorization: Bearer tok_bob_7a1e4c9b2d6f'   # 404 after alice created note 1"
+    }
+  ],
+  "blocked": [
+    {
+      "id": "B1",
+      "description": "POST /notes/export against the real archive service (the 202 path with the production EXPORT_URL).",
+      "why_not_runnable_locally": "The archive service is an external system of the platform team that is reachable from the production network only. The repository contains neither its URL nor credentials; EXPORT_URL exists only in the service environment of the production host, and the deploy job that leads there is manual. Only the unconfigured path (503 when EXPORT_URL is not set) can be run as is, and it works correctly.",
+      "acceptable_outcomes": [
+        "Reported as blocked or not run, with the reason that the real archive service is not reachable from a local machine and EXPORT_URL is not available.",
+        "Exercised against a local stub HTTP server set as EXPORT_URL and described as a stub run, not as a test of the real archive service. Against a stub the export answers 202 with {\"exported\": n} and uploads {\"user\", \"notes\"} with only the caller's notes; with an unreachable URL it answers 502.",
+        "The 503 answer without EXPORT_URL is reported as tested and passing."
+      ]
+    }
+  ],
+  "history_signals": [
+    {
+      "commit_subject": "feat: search notes by title",
+      "why_it_matters": "The most recent commit and the newest feature. docs/API.md promises a case-insensitive search, the commit message does not mention case, and the tests added with it use lower-case titles and queries only. Testing a query whose case differs from the title exposes D4."
+    },
+    {
+      "commit_subject": "refactor: move ownership checks into the store",
+      "why_it_matters": "Rewrites the access control of GET, PUT and DELETE without touching a test. The message names NoteStore.get and NoteStore.update but not delete, and the existing privacy test covers GET and PUT by another user, never DELETE. Re-testing all three operations with a second user exposes D1."
+    },
+    {
+      "commit_subject": "feat: paginate GET /notes",
+      "why_it_matters": "Introduces page and per_page. Its tests list at most three notes on a single page and never walk across a page boundary, so the rule that every note appears on exactly one page is unverified. Walking pages with a small per_page exposes D2. The message also explains why per_page above 50 is rejected instead of capped (T1)."
+    },
+    {
+      "commit_subject": "feat: create, read, update and delete notes",
+      "why_it_matters": "Introduces body parsing and validation and states that invalid bodies give 400. Together with \"test: cover auth and note CRUD over HTTP\" it shows that only field violations of well-formed JSON are tested; a body that is not JSON at all is never sent, which is where D3 sits. It also states the 404 rule for other users' notes (T3) and the 100-character title limit (T2)."
+    },
+    {
+      "commit_subject": "feat: export notes to the archive service",
+      "why_it_matters": "Adds a call to an external service configured by EXPORT_URL and says that the tests cover the unconfigured case only because the archive service is reachable from the production network only. This is the blocked item B1."
+    },
+    {
+      "commit_subject": "ci: add manual deploy job",
+      "why_it_matters": "Deployment is manual and production-only, and EXPORT_URL lives in the production environment. Neither can be exercised locally (B1)."
+    },
+    {
+      "commit_subject": "feat: persist notes to a JSON file with --data",
+      "why_it_matters": "Adds state that survives restarts. Worth a restart check through the command line; it works as documented (no defect planted here)."
+    }
+  ],
+  "ci": {
+    "files": [".gitlab-ci.yml"],
+    "what_ci_runs": [
+      "lint stage: python -m compileall -q notes_api (syntax check only)",
+      "test stage: python -m pytest -q (25 tests over HTTP against a server on a free port, plus store and command line tests)",
+      "deploy stage: a manual job on the default branch that copies the package to the production host; never run automatically"
+    ],
+    "what_ci_does_not_cover": [
+      "DELETE of a note by a user who does not own it (D1); only GET and PUT by another user are tested",
+      "Listings that span more than one page (D2); every pagination test fits on one page",
+      "Request bodies that are not well-formed JSON (D3); only well-formed bodies with invalid fields are tested",
+      "Search with a query whose case differs from the title (D4)",
+      "The export upload itself: only the 503 answer without EXPORT_URL is tested, never a 202 or 502 (B1)",
+      "Restarting the real server with --data (the store is tested directly, not through the command line)",
+      "405 and 501 answers, start-up failures, and any static analysis beyond byte-compilation",
+      "The deploy job, which is manual"
+    ]
+  }
+}

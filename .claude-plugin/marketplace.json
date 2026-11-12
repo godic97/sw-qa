@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sw-qa",
+  "description": "Software QA skill for AI coding agents.",
+  "owner": {
+    "name": "godic97"
+  },
+  "plugins": [
+    {
+      "name": "sw-qa",
+      "description": "Software QA skill for AI coding agents: when asked to verify that software works, the agent finds what needs testing from the commit history, the CI pipeline and the code, runs standard and domain-specific QA cases against the running software, measures test adequacy with mutation-gate, and reports defects and a go/no-go verdict with evidence. Works in Claude Code, Codex and other agents that load Agent Skills. English and Korean.",
+      "source": "./",
+      "category": "testing"
+    }
+  ]
+}

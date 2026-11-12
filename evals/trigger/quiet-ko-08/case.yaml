@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: quiet-ko-08
+description: "테스트 용어에 대한 개념 질문."
+tags: [trigger, quiet]
+runs: 3
+execution:
+  prompt: "통합 테스트랑 E2E 테스트 차이가 뭐야?"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: leaves-qa-skill-alone
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    min: 0
+    max: 0
+    arm: both

@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-en-11
+description: "출시 안전성에 대한 go/no-go 판정 요청."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "is this branch safe to ship? run it and give me a go/no-go"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both

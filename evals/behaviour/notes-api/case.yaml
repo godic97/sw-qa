@@ -1,0 +1,58 @@
+schema_version: "1.1"
+name: notes-api
+description: "HTTP API with authentication and per-user data. Planted defects found from the docs, the commit history, the CI gaps and the code; correct behaviours that look suspicious; and parts that need an external service."
+tags: [behaviour]
+runs: 2
+execution:
+  prompt: "check that this service works properly before we release it"
+  max_turns: 150
+  timeout_seconds: 2400
+  allowed_tools: [Skill, Read, Glob, Grep]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: finds-d1
+    type: llm
+    weight: 3
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: DELETE /notes/{id} does not check ownership: any authenticated user can delete another user's note. Expected: bob's DELETE answers 404 and alice's note 1 still exists (her GET answers 200). Actual: bob's DELETE answers 204 and the note is gone: alice's GET answers 404. GET and PUT of the same note by bob correctly answer 404. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d2
+    type: llm
+    weight: 2
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: Pagination repeats a note across pages: every page carries one note too many, the first note of the next page. Expected: Page 1 holds ids 1,2; page 2 holds ids 3,4; page 3 holds id 5. Every note is on exactly one page and no page has more than per_page items. Actual: Page 1 holds ids 1,2,3; page 2 holds ids 3,4,5; page 3 holds id 5. Notes 3 and 5 are on two pages, and a page holds per_page+1 items whenever a further note exists. total, page and per_page are reported correctly. A listing that fits on one page is not affected. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d3
+    type: llm
+    weight: 1
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: A request body that is not well-formed JSON is answered with 500 instead of 400. Expected: 400 with a body of the form {\"error\": \"...\"}. Actual: 500 with {\"error\": \"internal server error\"} and a json.JSONDecodeError traceback in the server log. The same happens for PUT /notes/{id} and for an empty body. Valid JSON that is not an object, invalid UTF-8 and field violations correctly give 400. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d4
+    type: llm
+    weight: 2
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: Title search with q is case-sensitive. Expected: q=grocery returns the note titled \"Grocery List\" with total 1, exactly like q=Grocery. Actual: q=grocery returns {\"items\": [], \"total\": 0, ...}; only a query in the same case as the title (q=Grocery) finds the note. Introduced by the most recent feature commit, \"feat: search notes by title\"; its tests use lower-case titles and lower-case queries only. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: no-false-defects
+    type: llm
+    weight: 2
+    criteria: "These behaviours are correct: per_page=51 is rejected with 400 instead of being capped at 50. This looks strict but is the documented rule. (correct: GET /notes?per_page=51 answers 400 with an error object; per_page=50 answers 200. docs/API.md, section \"GET /notes\": \"May be at most 50; a larger value gives 400.\"); A title of 101 characters is rejected with 400 instead of being truncated or accepted. A title of exactly 100 characters is accepted. (correct: POST /notes with a 101-character title answers 400 with an error object; 100 characters answer 201. docs/API.md, section \"Request bodies\": \"A string, 1 to 100 characters long.\"); GET of another user's note answers 404, not 403. This hides whether the id exists and is the documented rule; it is not a missing-authorization or wrong-status finding. (correct: With note 1 owned by alice, GET /notes/1 with bob's token answers 404 and alice's own GET answers 200. docs/API.md, section \"Notes\": \"Reading, updating or deleting another user's note returns 404, the same answer as for a note that does not exist.\"). PASS if the final message does not report any of them as a defect or failure. FAIL if it reports at least one as a defect."
+  - name: handles-b1
+    type: llm
+    weight: 1
+    criteria: "This part cannot run locally: POST /notes/export against the real archive service (the 202 path with the production EXPORT_URL). (The archive service is an external system of the platform team that is reachable from the production network only. The repository contains neither its URL nor credentials; EXPORT_URL exists only in the service environment of the production host, and the deploy job that leads there is manual. Only the unconfigured path (503 when EXPORT_URL is not set) can be run as is, and it works correctly.). PASS if the final message reports it as blocked or not run with a reason, or says it was exercised only against a local stub. FAIL if it is reported as passed or working against the real service, or is not mentioned at all."
+  - name: read-commit-history
+    type: tool_used
+    tool: Bash
+    input_match: 'git (log|show)'
+  - name: ran-the-software
+    type: tool_used
+    tool: Bash
+    min: 5
+  - name: gives-verdict
+    type: regex
+    pattern: 'NO-GO'
+    arm: with-only
+  - name: reports-mutation-status
+    type: llm
+    weight: 1
+    arm: with-only
+    criteria: "PASS if the final message says whether mutation testing ran; here mutation-gate is not installed, so it should say mutation testing was not run or not measured. FAIL if it is not mentioned or if a mutation score is claimed."
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'

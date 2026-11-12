@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-en-05
+description: "공용 코드 변경 후 회귀 확인 요청."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "regression pass on the settings page pls, I touched a lot of shared code"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both

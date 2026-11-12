@@ -1,0 +1,186 @@
+{
+  "name": "shopcart",
+  "domain": "money arithmetic, library plus command-line tool",
+  "runtime": "Python 3 standard library and pytest",
+  "how_to_run": [
+    "python -m compileall -q shopcart",
+    "python -m pytest -q",
+    "python -m shopcart total --items examples/items.json",
+    "python -m shopcart total --items examples/items.json --coupon WELCOME5000 --date 2026-10-01",
+    "python -m shopcart validate --items examples/items.json",
+    "python -c \"from datetime import date; from shopcart import LineItem, price_order; print(price_order([LineItem('Pen', 1200, 5)], coupon_code='WELCOME5000', on=date(2026, 10, 1)))\""
+  ],
+  "features": [
+    {
+      "id": "F1",
+      "name": "Line items and subtotal",
+      "entry_point": "python -m shopcart total --items FILE (Subtotal line); shopcart.LineItem, shopcart.parse_items(), shopcart.order_subtotal()",
+      "documented_in": "docs/pricing-rules.md, sections 'Amounts' and 'Line items'; README.md, section 'Command line'"
+    },
+    {
+      "id": "F2",
+      "name": "Tier discount",
+      "entry_point": "python -m shopcart total --items FILE (Tier discount line); shopcart.price_order(), shopcart.pricing.tier_discount()",
+      "documented_in": "docs/pricing-rules.md, section 'Tier discount'"
+    },
+    {
+      "id": "F3",
+      "name": "Coupons",
+      "entry_point": "python -m shopcart total --items FILE --coupon CODE [--date YYYY-MM-DD] (Coupon line); shopcart.price_order(items, coupon_code=..., on=...), shopcart.find_coupon()",
+      "documented_in": "docs/pricing-rules.md, section 'Coupons'"
+    },
+    {
+      "id": "F4",
+      "name": "VAT and total",
+      "entry_point": "python -m shopcart total --items FILE (VAT and Total lines); shopcart.price_order(), shopcart.pricing.vat()",
+      "documented_in": "docs/pricing-rules.md, sections 'VAT' and 'Worked example'"
+    },
+    {
+      "id": "F5",
+      "name": "CLI total command and exit status",
+      "entry_point": "python -m shopcart total --items FILE [--coupon CODE] [--date YYYY-MM-DD]; shopcart.cli.main()",
+      "documented_in": "README.md, sections 'Command line' and 'Exit status'"
+    },
+    {
+      "id": "F6",
+      "name": "CLI validate command",
+      "entry_point": "python -m shopcart validate --items FILE",
+      "documented_in": "README.md, sections 'Command line' and 'Exit status'"
+    }
+  ],
+  "defects": [
+    {
+      "id": "D1",
+      "feature": "F2",
+      "title": "Tier discount is not applied when the subtotal is exactly 100,000 KRW",
+      "severity": "Major",
+      "requirement_quote": "A subtotal of 100,000 KRW or more gets a 10% tier discount.",
+      "requirement_location": "docs/pricing-rules.md, section 'Tier discount'",
+      "repro": [
+        "printf '[{\"name\": \"Gift set\", \"unit_price\": 50000, \"quantity\": 2}]' > /tmp/d1.json",
+        "python -m shopcart total --items /tmp/d1.json"
+      ],
+      "expected": "Exit 0 with Subtotal 100,000, Tier discount 10,000, Coupon 0, VAT 9,000, Total 99,000 KRW.",
+      "actual": "Exit 0 with Subtotal 100,000, Tier discount 0, Coupon 0, VAT 10,000, Total 110,000 KRW: the customer is overcharged by 11,000 KRW. From 100,001 KRW upwards the discount is applied (100,001 gives Tier discount 10,000, Total 99,001). The library shows the same: shopcart.pricing.tier_discount(100000) returns 0.",
+      "discovery_route": "docs",
+      "domain_specific": true,
+      "location": "shopcart/pricing.py:90"
+    },
+    {
+      "id": "D2",
+      "feature": "F3",
+      "title": "A coupon is rejected as expired on its end date (regression of the fix 'accept coupons on their end date')",
+      "severity": "Major",
+      "requirement_quote": "A coupon takes a fixed amount off and is valid through its end date, inclusive.",
+      "requirement_location": "docs/pricing-rules.md, section 'Coupons'",
+      "repro": [
+        "printf '[{\"name\": \"Tea set\", \"unit_price\": 25000, \"quantity\": 2}]' > /tmp/d2.json",
+        "python -m shopcart total --items /tmp/d2.json --coupon CHUSEOK10000 --date 2026-09-30; echo \"exit=$?\""
+      ],
+      "expected": "Exit 0 with Subtotal 50,000, Tier discount 0, Coupon 10,000, VAT 4,000, Total 44,000 KRW, because CHUSEOK10000 ends on 2026-09-30 and that day is still valid.",
+      "actual": "Exit 2 with 'shopcart: error: coupon CHUSEOK10000 expired on 2026-09-30' on stderr and nothing on stdout. With --date 2026-09-29 the same order is priced correctly (Total 44,000). Every coupon is affected on its end date: AUTUMN30000 on 2026-10-31 and WELCOME5000 on 2027-12-31. In the library, shopcart.find_coupon('CHUSEOK10000', date(2026, 9, 30)) raises CouponError.",
+      "discovery_route": "commit-history",
+      "domain_specific": true,
+      "location": "shopcart/coupons.py:21"
+    },
+    {
+      "id": "D3",
+      "feature": "F4",
+      "title": "VAT rounds an exact half won to the even won (Python round) instead of half up",
+      "severity": "Minor",
+      "requirement_quote": "VAT of 10% is added after discounts and rounded half up to the nearest won.",
+      "requirement_location": "docs/pricing-rules.md, section 'VAT'",
+      "repro": [
+        "printf '[{\"name\": \"Phone case\", \"unit_price\": 12345, \"quantity\": 1}]' > /tmp/d3a.json",
+        "python -m shopcart total --items /tmp/d3a.json",
+        "printf '[{\"name\": \"Desk lamp\", \"unit_price\": 33350, \"quantity\": 3}]' > /tmp/d3b.json",
+        "python -m shopcart total --items /tmp/d3b.json"
+      ],
+      "expected": "First order: VAT on 12,345 KRW is 1,234.5, half up gives VAT 1,235 and Total 13,580 KRW. Second order: Subtotal 100,050, Tier discount 10,005, amount before VAT 90,045, VAT 9,004.5 half up gives VAT 9,005 and Total 99,050 KRW.",
+      "actual": "First order: VAT 1,234, Total 13,579 KRW. Second order: VAT 9,004, Total 99,049 KRW. The half won goes down whenever the amount before VAT ends in 5 and its tens digit is even (5, 25, 45, ... 12,345, 90,045); with an odd tens digit it goes up as documented (12,355 gives VAT 1,236). shopcart.pricing.vat(25) returns 2 instead of 3. The cause is round() applied to a float; for the same reason amounts above roughly 10^16 KRW, which need more than a thousand maximum-size lines, would also lose precision. That is the same line and the same fix, not a separate defect.",
+      "discovery_route": "code-analysis",
+      "domain_specific": true,
+      "location": "shopcart/pricing.py:97"
+    },
+    {
+      "id": "D4",
+      "feature": "F5",
+      "title": "total exits with status 1 and a traceback when the items file is not valid JSON",
+      "severity": "Minor",
+      "requirement_quote": "The CLI exits with status 0 on success and 2 on invalid input, printing a one-line message on stderr and no traceback.",
+      "requirement_location": "README.md, section 'Exit status'",
+      "repro": [
+        "printf '[{\"name\": \"Pen\", \"unit_price\": 1200, \"quantity\": 2},' > /tmp/d4.json",
+        "python -m shopcart total --items /tmp/d4.json; echo \"exit=$?\""
+      ],
+      "expected": "Exit status 2, nothing on stdout and a single line on stderr such as 'shopcart: error: not valid JSON: ...', which is what 'python -m shopcart validate --items /tmp/d4.json' prints for the same file. README.md lists an items file that 'is not valid JSON' as invalid input.",
+      "actual": "Exit status 1 and a multi-line Python traceback ending in 'json.decoder.JSONDecodeError: Expecting value: ...' on stderr. Every file the JSON decoder cannot read behaves this way with total: an empty file, CSV text, a UTF-8 BOM, bytes that are not UTF-8 (UnicodeDecodeError) and extremely deep nesting (RecursionError). These are one defect with one cause: _cmd_total reads the file without the handling _cmd_validate has, and main() only catches OrderError, CouponError and OSError.",
+      "discovery_route": "ci-gap",
+      "domain_specific": false,
+      "location": "shopcart/cli.py:40"
+    }
+  ],
+  "traps": [
+    {
+      "id": "T1",
+      "description": "A quantity of 0 or a negative quantity makes total and validate stop with exit status 2 and an error message. A careless tester may report the non-zero exit as a failure, or expect such a line to be skipped or priced as 0.",
+      "correct_behaviour": "Exit status 2, nothing on stdout and exactly one line on stderr: 'shopcart: error: item 1: quantity must be a positive integer'. docs/pricing-rules.md, section 'Line items', says 'Quantities must be positive integers.' and README.md, section 'Exit status', defines exit status 2 with a one-line message for invalid input.",
+      "check": "printf '[{\"name\": \"Pen\", \"unit_price\": 1200, \"quantity\": 0}]' > /tmp/t1.json; python -m shopcart total --items /tmp/t1.json; echo \"exit=$?\""
+    },
+    {
+      "id": "T2",
+      "description": "A coupon worth more than the amount due (WELCOME5000 on a 3,000 KRW order) is accepted and the order costs nothing. A careless tester may expect an error, a negative total, a minimum order value, or VAT on the original amount.",
+      "correct_behaviour": "Exit status 0 with Subtotal 3,000, Tier discount 0, Coupon 3,000 (the amount actually taken off), VAT 0, Total 0 KRW. docs/pricing-rules.md, section 'Coupons', says 'The total never goes below 0: a coupon worth more than the amount due brings it to 0, and the unused part of the coupon is lost.'",
+      "check": "printf '[{\"name\": \"Sticker pack\", \"unit_price\": 3000, \"quantity\": 1}]' > /tmp/t2.json; python -m shopcart total --items /tmp/t2.json --coupon WELCOME5000 --date 2026-10-01; echo \"exit=$?\""
+    }
+  ],
+  "blocked": [],
+  "history_signals": [
+    {
+      "commit_subject": "fix: accept coupons on their end date",
+      "why_it_matters": "Fixes exactly the behaviour D2 breaks again: at this commit '--coupon CHUSEOK10000 --date 2026-09-30' is accepted. The change is one comparison ('on >= end_date' became 'on > end_date') and came without a regression test, so the fixed behaviour has to be re-tested at HEAD."
+    },
+    {
+      "commit_subject": "refactor: model coupons as a dataclass",
+      "why_it_matters": "Says 'No change in behaviour' but rewrites the expiry check as Coupon.is_expired with 'on >= self.expires', the comparison the earlier fix had removed (D2). The tests it rewrites use a date well before and a date well after the end date, so the suite stays green."
+    },
+    {
+      "commit_subject": "fix: round VAT to the nearest won",
+      "why_it_matters": "Replaces truncation with Python's round() while the commit body and docs/pricing-rules.md promise half up. round() sends an exact half to the even neighbour (D3). The test added with the change checks fractions of .9 and .4 only."
+    },
+    {
+      "commit_subject": "feat: add tier discount and VAT",
+      "why_it_matters": "Introduces the tier discount with 'subtotal > TIER_THRESHOLD' while the rule it documents says '100,000 KRW or more' (D1). Its tests use 60,000 and 250,000 KRW, never the threshold itself."
+    },
+    {
+      "commit_subject": "feat: add command-line interface",
+      "why_it_matters": "Introduces total and the exit-status contract (0, or 2 with one line on stderr). main() catches OrderError, CouponError and OSError only, so a JSON decoding error leaves total as a traceback with exit status 1 (D4)."
+    },
+    {
+      "commit_subject": "feat: add validate subcommand",
+      "why_it_matters": "Adds JSON error handling to validate only ('A file that is not JSON at all is reported like any other invalid input') and a test for it. total keeps reading the file without that handling, and no test feeds it a file that is not JSON (D4)."
+    },
+    {
+      "commit_subject": "ci: run compileall and pytest on push",
+      "why_it_matters": "Shows the whole safety net: byte-compilation and the unit tests. Boundary values, the error paths of total and the behaviour of the real 'python -m shopcart' process are not checked by anything."
+    }
+  ],
+  "ci": {
+    "files": [
+      ".github/workflows/ci.yml"
+    ],
+    "what_ci_runs": [
+      "python -m pip install pytest",
+      "python -m compileall -q shopcart",
+      "python -m pytest -q"
+    ],
+    "what_ci_does_not_cover": [
+      "The tier discount at a subtotal of exactly 100,000 KRW: the tests use subtotals of at most 60,000 KRW and of 153,000 and 250,000 KRW (D1).",
+      "Redeeming a coupon on its end date: the tests use dates well before or well after the end date (D2).",
+      "VAT on an amount that gives an exact half won: the tests use whole results and fractions of .4 and .9 (D3).",
+      "total with an items file that is not valid JSON: only validate has such a test (D4).",
+      "The CLI as a real process: the tests call shopcart.cli.main() in-process, so the exit status and stderr of 'python -m shopcart' after an uncaught exception are never observed.",
+      "The examples in README.md and the rules in docs/pricing-rules.md are not checked against the code; there is no linting, type checking or coverage threshold."
+    ]
+  }
+}

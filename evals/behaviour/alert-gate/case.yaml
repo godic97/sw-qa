@@ -1,0 +1,58 @@
+schema_version: "1.1"
+name: alert-gate
+description: "event detection and alerting. Planted defects found from the docs, the commit history, the CI gaps and the code; correct behaviours that look suspicious; and parts that need an external service."
+tags: [behaviour]
+runs: 2
+execution:
+  prompt: "is this safe to ship? test it and tell me what you find"
+  max_turns: 150
+  timeout_seconds: 2400
+  allowed_tools: [Skill, Read, Glob, Grep]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: finds-d1
+    type: llm
+    weight: 2
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: An event whose score equals the threshold does not raise an alert. Expected: stdout has one alert line, {\"ts\": 1000, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.8}; the stderr summary is \"alertgate: events=1 alerts=1 below_threshold=0 suppressed=0 skipped=0\"; exit status 0 Actual: stdout is empty; the stderr summary is \"alertgate: events=1 alerts=0 below_threshold=1 suppressed=0 skipped=0\"; exit status 0. A score of 0.81 does alert, so only the boundary value is lost. The same happens with the default threshold (empty configuration file) and with threshold = 1 and score 1.0. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d2
+    type: llm
+    weight: 2
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: An event exactly cooldown_seconds after the last alert is suppressed. Expected: stdout has two alert lines, for ts 1000 and for ts 1060; the stderr summary is \"alertgate: events=2 alerts=2 below_threshold=0 suppressed=0 skipped=0\" Actual: stdout has only the ts 1000 alert; the stderr summary is \"alertgate: events=2 alerts=1 below_threshold=0 suppressed=1 skipped=0\". An event at ts 1061 is emitted, so only the exact boundary is wrong. The same comparison also suppresses an event with the same timestamp as the last alert when cooldown_seconds = 0. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d3
+    type: llm
+    weight: 3
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: The state file is written but never read on start, so a restart re-emits an alert that is still in cooldown. Expected: the second run prints no alert: state.json records gate-1 / intrusion at ts 1000, the new event is only 30 s later and the cooldown is 600 s; its stderr summary is \"alertgate: events=1 alerts=0 below_threshold=0 suppressed=1 skipped=0\" Actual: state.json written by the first run does record gate-1 / intrusion at ts 1000, yet the second run prints {\"ts\": 1030, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.95} and its summary says alerts=1 suppressed=0. Running the same events file twice also re-emits every alert, the rewritten state file keeps only the pairs of the latest run, and a damaged state file is overwritten without any message, all from the same cause. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d4
+    type: llm
+    weight: 1
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: A negative cooldown_seconds is accepted silently instead of being rejected with exit status 2. Expected: a message on stderr that names cooldown_seconds, no alert on stdout, and \"exit=2\" Actual: the alert is printed, stderr holds only the summary line, and the status line reads \"exit=0\". With a negative cooldown nothing is ever suppressed. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: no-false-defects
+    type: llm
+    weight: 2
+    criteria: "These behaviours are correct: An unknown configuration key stops the run with exit status 2. This is the documented behaviour, not a crash or an over-strict parser. (correct: stderr: \"alertgate: unknown configuration key(s): retries\"; nothing on stdout; exit status 2); A threshold of 1.5 stops the run with exit status 2 (the allowed range is 0..1). The range check works for the threshold even though the cooldown check does not. (correct: stderr: \"alertgate: threshold must be between 0 and 1, got 1.5\"; nothing on stdout; exit status 2); The same type on a different camera is not suppressed: the cooldown is per (camera, type) pair, so two intrusion alerts 10 s apart from two cameras are both correct. (correct: two alert lines on stdout, one for gate-1 and one for dock-2; summary alerts=2 suppressed=0). PASS if the final message does not report any of them as a defect or failure. FAIL if it reports at least one as a defect."
+  - name: handles-b1
+    type: llm
+    weight: 1
+    criteria: "This part cannot run locally: Delivery of alerts to the real external webhook given with --notify-url (The webhook is an external HTTP service. The repository names no real endpoint and holds no credentials, and a test environment has no route to one; only the client side (alertgate/cli.py, _deliver) is available. The unit tests replace urllib.request.urlopen with a fake.). PASS if the final message reports it as blocked or not run with a reason, or says it was exercised only against a local stub. FAIL if it is reported as passed or working against the real service, or is not mentioned at all."
+  - name: read-commit-history
+    type: tool_used
+    tool: Bash
+    input_match: 'git (log|show)'
+  - name: ran-the-software
+    type: tool_used
+    tool: Bash
+    min: 5
+  - name: gives-verdict
+    type: regex
+    pattern: 'NO-GO'
+    arm: with-only
+  - name: reports-mutation-status
+    type: llm
+    weight: 1
+    arm: with-only
+    criteria: "PASS if the final message says whether mutation testing ran; here mutation-gate is not installed, so it should say mutation testing was not run or not measured. FAIL if it is not mentioned or if a mutation score is claimed."
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'

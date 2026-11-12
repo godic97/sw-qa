@@ -1,0 +1,202 @@
+{
+  "name": "sensor-etl",
+  "domain": "batch data pipeline",
+  "runtime": "Node.js 24, no npm dependencies, tests with the built-in node:test runner",
+  "how_to_run": [
+    "node bin/sensor-etl.js --help",
+    "node bin/sensor-etl.js ingest --in examples/input --out /tmp/sensor-etl-out",
+    "node bin/sensor-etl.js report --out /tmp/sensor-etl-out",
+    "make lint test",
+    "node --test"
+  ],
+  "features": [
+    {
+      "id": "F1",
+      "name": "Ingest CSV exports into one JSON file per day with count, min, max and avg per sensor",
+      "entry_point": "node bin/sensor-etl.js ingest --in <dir> --out <dir>",
+      "documented_in": "README.md, sections \"Usage\", \"Input\" and \"Output\""
+    },
+    {
+      "id": "F2",
+      "name": "Daily buckets follow the Asia/Seoul calendar day (UTC+9)",
+      "entry_point": "node bin/sensor-etl.js ingest --in <dir> --out <dir>",
+      "documented_in": "README.md, section \"Daily buckets\""
+    },
+    {
+      "id": "F3",
+      "name": "Idempotent ingest: a second run on the same input leaves the output byte-identical",
+      "entry_point": "node bin/sensor-etl.js ingest --in <dir> --out <dir> (run twice)",
+      "documented_in": "README.md, section \"Output\""
+    },
+    {
+      "id": "F4",
+      "name": "Malformed rows are skipped, listed in <out>/rejected.csv with a reason and counted in the summary line",
+      "entry_point": "node bin/sensor-etl.js ingest --in <dir> --out <dir>",
+      "documented_in": "README.md, section \"Rejected rows\"; CLI help (node bin/sensor-etl.js --help)"
+    },
+    {
+      "id": "F5",
+      "name": "Sensor names are arbitrary UTF-8 text and every distinct name is its own key",
+      "entry_point": "node bin/sensor-etl.js ingest --in <dir> --out <dir>",
+      "documented_in": "README.md, section \"Input\""
+    },
+    {
+      "id": "F6",
+      "name": "Report of the stored aggregates as tab-separated text",
+      "entry_point": "node bin/sensor-etl.js report --out <dir>",
+      "documented_in": "README.md, section \"Usage\""
+    },
+    {
+      "id": "F7",
+      "name": "Exit status: 0 also for a run without input files, 1 for usage errors, 2 for a missing input or output directory",
+      "entry_point": "node bin/sensor-etl.js ingest|report ...",
+      "documented_in": "README.md, sections \"Usage\" and \"Exit status\"; CLI help"
+    },
+    {
+      "id": "F8",
+      "name": "Input tolerance: LF or CRLF line endings, blank lines, whitespace around fields, files without the header are skipped with a warning",
+      "entry_point": "node bin/sensor-etl.js ingest --in <dir> --out <dir>",
+      "documented_in": "README.md, section \"Input\""
+    }
+  ],
+  "defects": [
+    {
+      "id": "D1",
+      "feature": "F2",
+      "title": "Readings are bucketed by their UTC date instead of the Asia/Seoul calendar day",
+      "severity": "Critical",
+      "requirement_quote": "Daily buckets use the Asia/Seoul calendar day (UTC+9, no daylight saving).",
+      "requirement_location": "README.md, section \"Daily buckets\"",
+      "repro": [
+        "rm -rf /tmp/sensor-etl-d1 && mkdir -p /tmp/sensor-etl-d1/in",
+        "printf 'sensor,timestamp,value\\ntemp-1,2026-09-01T15:30:00Z,21.5\\n' > /tmp/sensor-etl-d1/in/a.csv",
+        "node bin/sensor-etl.js ingest --in /tmp/sensor-etl-d1/in --out /tmp/sensor-etl-d1/out",
+        "ls /tmp/sensor-etl-d1/out/daily"
+      ],
+      "expected": "daily/2026-09-02.json: 2026-09-01T15:30:00Z is 00:30 on 2 September in Asia/Seoul, so the reading belongs to the 2026-09-02 bucket (the README gives the same example with 15:00:00Z).",
+      "actual": "daily/2026-09-01.json: the reading is filed under its UTC date. Every reading taken between 15:00Z and 23:59Z ends up in the file of the previous Seoul day, independent of the TZ setting of the machine.",
+      "discovery_route": "docs",
+      "domain_specific": true,
+      "location": "lib/timeutil.js:21"
+    },
+    {
+      "id": "D2",
+      "feature": "F3",
+      "title": "A second ingest run on the same input double counts: every count in the daily files is added again",
+      "severity": "Critical",
+      "requirement_quote": "Ingest is idempotent: running it again on the same input leaves the output byte-identical.",
+      "requirement_location": "README.md, section \"Output\"",
+      "repro": [
+        "rm -rf /tmp/sensor-etl-d2 /tmp/sensor-etl-d2-first",
+        "node bin/sensor-etl.js ingest --in examples/input --out /tmp/sensor-etl-d2",
+        "cp -R /tmp/sensor-etl-d2 /tmp/sensor-etl-d2-first",
+        "node bin/sensor-etl.js ingest --in examples/input --out /tmp/sensor-etl-d2",
+        "diff -r /tmp/sensor-etl-d2-first /tmp/sensor-etl-d2"
+      ],
+      "expected": "diff prints nothing and exits 0: after the second run daily/2026-09-01.json and daily/2026-09-02.json are byte-identical to the result of the first run.",
+      "actual": "Both daily files change. Every count is doubled (2026-09-01: humidity-1 count 2 -> 4, temp-1 count 3 -> 6; 2026-09-02: both counts 2 -> 4) while min, max and avg stay the same; each further run adds the counts once more. Ingest merges the batch into the stored daily files without knowing that it has already been ingested.",
+      "discovery_route": "commit-history",
+      "domain_specific": true,
+      "location": "lib/ingest.js:52"
+    },
+    {
+      "id": "D3",
+      "feature": "F4",
+      "title": "Rejected rows are counted in the summary line but <out>/rejected.csv is never written",
+      "severity": "Major",
+      "requirement_quote": "Malformed rows are skipped, written to `<out>/rejected.csv` with a reason, and counted in the summary line as `rejected=<n>`.",
+      "requirement_location": "README.md, section \"Rejected rows\"",
+      "repro": [
+        "rm -rf /tmp/sensor-etl-d3 && mkdir -p /tmp/sensor-etl-d3/in",
+        "printf 'sensor,timestamp,value\\ntemp-1,2026-09-01T03:00:00Z,21.5\\ntemp-1,not-a-time,21.5\\ntemp-1,2026-09-01T03:00:00Z,warm\\ntemp-1,21.5\\n' > /tmp/sensor-etl-d3/in/a.csv",
+        "node bin/sensor-etl.js ingest --in /tmp/sensor-etl-d3/in --out /tmp/sensor-etl-d3/out",
+        "ls /tmp/sensor-etl-d3/out",
+        "cat /tmp/sensor-etl-d3/out/rejected.csv"
+      ],
+      "expected": "The summary line reports rejected=3 and /tmp/sensor-etl-d3/out/rejected.csv exists with the header file,line,reason,row followed by three lines: a.csv,3,unparseable timestamp,... / a.csv,4,non-numeric value,... / a.csv,5,wrong column count,...",
+      "actual": "The summary line is 'ingested files=1 rows=4 accepted=1 rejected=3 days=1', but the output directory only contains daily/. rejected.csv does not exist (cat: No such file or directory). A rejected.csv left over from an earlier run is even removed.",
+      "discovery_route": "ci-gap",
+      "domain_specific": true,
+      "location": "lib/ingest.js:36"
+    },
+    {
+      "id": "D4",
+      "feature": "F5",
+      "title": "Non-ASCII characters are stripped from sensor names, so different Korean-named sensors are merged into one key",
+      "severity": "Major",
+      "requirement_quote": "Korean names such as `온도-1` are allowed, and different names are different keys.",
+      "requirement_location": "README.md, section \"Input\"",
+      "repro": [
+        "rm -rf /tmp/sensor-etl-d4 && mkdir -p /tmp/sensor-etl-d4/in",
+        "printf 'sensor,timestamp,value\\n온도-1,2026-09-01T03:00:00Z,21.5\\n습도-1,2026-09-01T03:00:00Z,55\\n' > /tmp/sensor-etl-d4/in/a.csv",
+        "node bin/sensor-etl.js ingest --in /tmp/sensor-etl-d4/in --out /tmp/sensor-etl-d4/out",
+        "cat /tmp/sensor-etl-d4/out/daily/2026-09-01.json"
+      ],
+      "expected": "daily/2026-09-01.json has two keys: \"습도-1\" with {\"count\":1,\"min\":55,\"max\":55,\"avg\":55} and \"온도-1\" with {\"count\":1,\"min\":21.5,\"max\":21.5,\"avg\":21.5}.",
+      "actual": "daily/2026-09-01.json has the single key \"-1\" with {\"count\":2,\"min\":21.5,\"max\":55,\"avg\":38.25}: the Korean characters are removed from both names and a temperature and a humidity sensor are aggregated together. Names that consist only of non-ASCII characters (온도, 습도) all end up under the empty key \"\".",
+      "discovery_route": "code-analysis",
+      "domain_specific": false,
+      "location": "lib/aggregate.js:11"
+    }
+  ],
+  "traps": [
+    {
+      "id": "T1",
+      "description": "An input directory that exists but holds no *.csv file makes ingest print \"no input files\" and exit 0 without creating the output directory. This can look like a silently swallowed error, but it is the documented behaviour (README sections \"Usage\" and \"Exit status\", CLI help, and the message of the commit \"fix: exit with status 2 when the input directory is missing\"). Only a missing directory is an error (exit 2).",
+      "correct_behaviour": "stdout is exactly \"no input files\", the exit status is 0 and nothing is written.",
+      "check": "d=$(mktemp -d) && mkdir \"$d/in\" && node bin/sensor-etl.js ingest --in \"$d/in\" --out \"$d/out\"; echo \"exit=$?\"; ls \"$d\""
+    },
+    {
+      "id": "T2",
+      "description": "CRLF line endings. The history contains \"fix: accept CRLF line endings\" and the parser was touched again afterwards (\"refactor: let the parser tag rejected rows with their file\"), which invites the suspicion of a regression. CRLF input is still ingested completely: no row is rejected and the output equals the one for LF input.",
+      "correct_behaviour": "The summary line is \"ingested files=1 rows=2 accepted=2 rejected=0 days=1\" and daily/2026-09-01.json contains \"temp-1\": {\"count\":2,\"min\":21.5,\"max\":22,\"avg\":21.75}, exactly as for the same rows with LF endings.",
+      "check": "d=$(mktemp -d) && mkdir \"$d/in\" && printf 'sensor,timestamp,value\\r\\ntemp-1,2026-09-01T03:00:00Z,21.5\\r\\ntemp-1,2026-09-01T04:00:00Z,22\\r\\n' > \"$d/in/a.csv\" && node bin/sensor-etl.js ingest --in \"$d/in\" --out \"$d/out\" && cat \"$d/out/daily/2026-09-01.json\""
+    }
+  ],
+  "blocked": [],
+  "history_signals": [
+    {
+      "commit_subject": "perf: merge into existing daily files",
+      "why_it_matters": "The most recent functional change. It replaces the rebuild of daily/ with a merge into the files of earlier runs but does not track which input has already been ingested, which introduces D2 while the README still promises idempotent re-runs. The only test it adds covers mergeStats in isolation."
+    },
+    {
+      "commit_subject": "refactor: simplify day key formatting",
+      "why_it_matters": "Presented as a pure refactoring of dayKey, but the diff also drops the 9 hour shift to Asia/Seoul, which introduces D1. No test uses a timestamp between 15:00Z and 24:00Z, so the suite stays green."
+    },
+    {
+      "commit_subject": "fix: drop control characters from sensor names",
+      "why_it_matters": "Adds sensorKey(), which keeps printable ASCII characters only and therefore introduces D4. The tests added with it use ASCII names only."
+    },
+    {
+      "commit_subject": "refactor: let the parser tag rejected rows with their file",
+      "why_it_matters": "Rewrites the ingest loop: the destructured `rejected` now shadows the list that is passed to writeRejected, and the line that filled that list is removed. This introduces D3; lint is node --check only and does not report the shadowing."
+    },
+    {
+      "commit_subject": "feat: write malformed rows to rejected.csv",
+      "why_it_matters": "Introduces the rejected.csv requirement together with its tests (parser reasons, the writer function in isolation, the rejected=<n> count). None of them looks at the file after an ingest run, which is why D3 goes unnoticed."
+    },
+    {
+      "commit_subject": "fix: accept CRLF line endings",
+      "why_it_matters": "Trap T2: a past fix in a file that later commits changed again. CRLF input still works and must not be reported as a regression."
+    },
+    {
+      "commit_subject": "fix: exit with status 2 when the input directory is missing",
+      "why_it_matters": "Trap T1: the message states that an existing directory without CSV files is not an error (prints \"no input files\", exit 0), while a missing directory exits 2."
+    }
+  ],
+  "ci": {
+    "files": ["Jenkinsfile", "Makefile", "package.json"],
+    "what_ci_runs": [
+      "make lint: node --check on bin/*.js, lib/*.js and test/*.js (syntax check only)",
+      "make test: node --test, 29 tests in test/*.test.js (unit tests for decimal, timeutil, csv, aggregate and rejects, plus CLI smoke tests that each run once against a fresh temporary directory)"
+    ],
+    "what_ci_does_not_cover": [
+      "No test uses a timestamp between 15:00Z and 23:59Z, where the UTC day and the Asia/Seoul day differ (D1)",
+      "No test runs ingest twice against the same output directory, so idempotency is never checked (D2)",
+      "No test looks for <out>/rejected.csv after an ingest run; only the parser, the writer function in isolation and the rejected=<n> count are tested (D3)",
+      "No test uses a non-ASCII sensor name (D4)",
+      "Lint is node --check only; there is no static analysis that would report the shadowed variable behind D3",
+      "The Jenkins pipeline (docker agent node:24-bookworm) only wraps make lint test, which can be run locally as it is"
+    ]
+  }
+}

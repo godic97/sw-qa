@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: quiet-ko-10
+description: "'QA'가 들어가지만 문서 작성 요청. 검증할 대상 소프트웨어가 없음."
+tags: [trigger, quiet]
+runs: 3
+execution:
+  prompt: "신규 입사자용 QA 프로세스 온보딩 문서 초안 써줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: leaves-qa-skill-alone
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    min: 0
+    max: 0
+    arm: both

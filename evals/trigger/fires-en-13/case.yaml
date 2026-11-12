@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-en-13
+description: "기능에 대한 테스트 시나리오 설계 요청."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "come up with test scenarios for the password reset feature"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both

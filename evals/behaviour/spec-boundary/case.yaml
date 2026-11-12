@@ -1,0 +1,46 @@
+schema_version: "1.1"
+name: spec-boundary
+description: A pricing function with a written specification. Two requirements are violated and the existing tests pass. The QA pass must find both by executing the function, and say that mutation testing was not run.
+tags: [behaviour, smoke]
+runs: 3
+execution:
+  prompt: "shop.py가 SPEC.md대로 제대로 동작하는지 테스트해줘"
+  max_turns: 60
+  timeout_seconds: 1200
+  allowed_tools: [Skill, Read, Glob, Grep]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: finds-boundary-defect
+    type: llm
+    weight: 2
+    criteria: >-
+      PASS if the final message reports as a defect or failure that an order of exactly 100,000 won
+      is not discounted (it stays 100000) although the specification requires a 10% discount at
+      100,000 won or more. FAIL if this is missing or described as correct behaviour.
+  - name: finds-negative-amount-defect
+    type: llm
+    weight: 2
+    criteria: >-
+      PASS if the final message reports as a defect or failure that a negative amount does not raise
+      ValueError although the specification requires it. FAIL if this is missing or described as
+      correct behaviour.
+  - name: executed-the-function
+    type: tool_used
+    tool: Bash
+    input_match: 'python'
+  - name: gives-no-go-verdict
+    type: regex
+    pattern: 'NO-GO'
+    arm: with-only
+  - name: reports-mutation-testing-not-run
+    type: llm
+    arm: with-only
+    criteria: >-
+      PASS if the final message says that mutation testing was not run or not measured (for example
+      because mutation-gate is not installed). FAIL if mutation testing is not mentioned, or if a
+      mutation score is claimed.
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'

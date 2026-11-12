@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: quiet-en-07
+description: "명시된 명령 하나를 실행하고 출력만 전달하면 되는 요청."
+tags: [trigger, quiet]
+runs: 3
+execution:
+  prompt: "run npm test -- --coverage and paste the summary"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: leaves-qa-skill-alone
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    min: 0
+    max: 0
+    arm: both

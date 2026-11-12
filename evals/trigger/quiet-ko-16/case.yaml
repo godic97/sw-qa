@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: quiet-ko-16
+description: "제품 동작이 아니라 테스트 스위트의 품질을 재는 요청. 플러그인 README(/home/hicams/workspace/sw-qa/README.md)가 범위 밖으로 명시."
+tags: [trigger, quiet]
+runs: 3
+execution:
+  prompt: "우리 유닛 테스트가 진짜 버그를 잡는지 뮤테이션 테스트 돌려줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: leaves-qa-skill-alone
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    min: 0
+    max: 0
+    arm: both

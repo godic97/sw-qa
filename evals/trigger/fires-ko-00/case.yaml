@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-ko-00
+description: "직접적인 QA 요청. 대상은 현재 변경분(diff)."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "이번 변경분 QA 진행해줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both

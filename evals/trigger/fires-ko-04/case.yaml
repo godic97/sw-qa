@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-ko-04
+description: "릴리스 전 점검 요청. 출시 가능 여부 판정이 필요."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "내일 배포야. 릴리스 전에 전체 점검 한번 해줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both

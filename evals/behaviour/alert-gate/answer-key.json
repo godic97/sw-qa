@@ -1,0 +1,225 @@
+{
+  "name": "alert-gate",
+  "domain": "event detection and alerting",
+  "runtime": "Python 3 standard library (tomllib, so Python 3.11 or newer) and pytest; nothing to install",
+  "how_to_run": [
+    "python -m pytest -q",
+    "python -m alertgate run --config alertgate.example.toml --events examples/events.jsonl --state \"$(mktemp -d)/state.json\"",
+    "python -m alertgate run --help"
+  ],
+  "features": [
+    {
+      "id": "F1",
+      "name": "Score threshold: an event alerts when its score is at or above the threshold (default 0.80)",
+      "entry_point": "python -m alertgate run --config FILE --events FILE --state FILE (alertgate/engine.py, AlertGate.accept)",
+      "documented_in": "docs/behaviour.md, section \"Threshold\"; README.md, section \"How alerts are decided\"; python -m alertgate run --help"
+    },
+    {
+      "id": "F2",
+      "name": "Per-pair cooldown: repeat alerts for the same (camera, type) are suppressed for cooldown_seconds, other pairs are unaffected",
+      "entry_point": "python -m alertgate run (alertgate/engine.py, AlertGate.accept)",
+      "documented_in": "docs/behaviour.md, section \"Cooldown\""
+    },
+    {
+      "id": "F3",
+      "name": "Cooldown state persisted in the state file and restored on the next run",
+      "entry_point": "python -m alertgate run --state FILE (alertgate/state.py, StateStore; wired in alertgate/cli.py, _run)",
+      "documented_in": "docs/behaviour.md, section \"State file\"; README.md, section \"How alerts are decided\""
+    },
+    {
+      "id": "F4",
+      "name": "Configuration loading and validation (unknown keys, threshold range, cooldown sign, value types) with exit status 2",
+      "entry_point": "python -m alertgate run --config FILE (alertgate/config.py, load_config)",
+      "documented_in": "docs/behaviour.md, section \"Configuration\""
+    },
+    {
+      "id": "F5",
+      "name": "Unusable event lines are skipped and counted; summary line on stderr",
+      "entry_point": "python -m alertgate run --events FILE (alertgate/engine.py, parse_event and AlertGate.feed)",
+      "documented_in": "docs/behaviour.md, sections \"Events\" and \"Output\""
+    },
+    {
+      "id": "F6",
+      "name": "Out-of-order events: an event older than the last alert of its pair never emits",
+      "entry_point": "python -m alertgate run (alertgate/engine.py, AlertGate.accept)",
+      "documented_in": "docs/behaviour.md, section \"Cooldown\" (third paragraph)"
+    },
+    {
+      "id": "F7",
+      "name": "Webhook delivery: every alert is also sent by HTTP POST to --notify-url",
+      "entry_point": "python -m alertgate run ... --notify-url URL (alertgate/cli.py, _deliver)",
+      "documented_in": "docs/behaviour.md, section \"Webhook\""
+    },
+    {
+      "id": "F8",
+      "name": "Exit statuses 0 / 1 / 2",
+      "entry_point": "python -m alertgate run (alertgate/cli.py, _run)",
+      "documented_in": "docs/behaviour.md, section \"Exit status\""
+    }
+  ],
+  "defects": [
+    {
+      "id": "D1",
+      "feature": "F1",
+      "title": "An event whose score equals the threshold does not raise an alert",
+      "severity": "Major",
+      "requirement_quote": "An event raises an alert when its score is at or above the threshold.",
+      "requirement_location": "docs/behaviour.md, section \"Threshold\" (the same sentence is in README.md, section \"How alerts are decided\")",
+      "repro": [
+        "W=$(mktemp -d)",
+        "printf 'threshold = 0.80\\ncooldown_seconds = 60\\n' > \"$W/alertgate.toml\"",
+        "echo '{\"ts\": 1000, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.80}' > \"$W/events.jsonl\"",
+        "python -m alertgate run --config \"$W/alertgate.toml\" --events \"$W/events.jsonl\" --state \"$W/state.json\""
+      ],
+      "expected": "stdout has one alert line, {\"ts\": 1000, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.8}; the stderr summary is \"alertgate: events=1 alerts=1 below_threshold=0 suppressed=0 skipped=0\"; exit status 0",
+      "actual": "stdout is empty; the stderr summary is \"alertgate: events=1 alerts=0 below_threshold=1 suppressed=0 skipped=0\"; exit status 0. A score of 0.81 does alert, so only the boundary value is lost. The same happens with the default threshold (empty configuration file) and with threshold = 1 and score 1.0.",
+      "discovery_route": "docs",
+      "domain_specific": true,
+      "location": "alertgate/engine.py:100"
+    },
+    {
+      "id": "D2",
+      "feature": "F2",
+      "title": "An event exactly cooldown_seconds after the last alert is suppressed",
+      "severity": "Major",
+      "requirement_quote": "An event that arrives exactly `cooldown_seconds` after the last alert is emitted.",
+      "requirement_location": "docs/behaviour.md, section \"Cooldown\"",
+      "repro": [
+        "W=$(mktemp -d)",
+        "printf 'threshold = 0.80\\ncooldown_seconds = 60\\n' > \"$W/alertgate.toml\"",
+        "printf '%s\\n' '{\"ts\": 1000, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.95}' '{\"ts\": 1060, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.95}' > \"$W/events.jsonl\"",
+        "python -m alertgate run --config \"$W/alertgate.toml\" --events \"$W/events.jsonl\" --state \"$W/state.json\""
+      ],
+      "expected": "stdout has two alert lines, for ts 1000 and for ts 1060; the stderr summary is \"alertgate: events=2 alerts=2 below_threshold=0 suppressed=0 skipped=0\"",
+      "actual": "stdout has only the ts 1000 alert; the stderr summary is \"alertgate: events=2 alerts=1 below_threshold=0 suppressed=1 skipped=0\". An event at ts 1061 is emitted, so only the exact boundary is wrong. The same comparison also suppresses an event with the same timestamp as the last alert when cooldown_seconds = 0.",
+      "discovery_route": "commit-history",
+      "domain_specific": true,
+      "location": "alertgate/engine.py:110"
+    },
+    {
+      "id": "D3",
+      "feature": "F3",
+      "title": "The state file is written but never read on start, so a restart re-emits an alert that is still in cooldown",
+      "severity": "Critical",
+      "requirement_quote": "Cooldowns therefore survive restarts: a pair that is still in cooldown when the process is restarted stays suppressed until its cooldown has passed.",
+      "requirement_location": "docs/behaviour.md, section \"State file\"",
+      "repro": [
+        "W=$(mktemp -d)",
+        "printf 'threshold = 0.80\\ncooldown_seconds = 600\\n' > \"$W/alertgate.toml\"",
+        "echo '{\"ts\": 1000, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.95}' > \"$W/first.jsonl\"",
+        "echo '{\"ts\": 1030, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.95}' > \"$W/second.jsonl\"",
+        "python -m alertgate run --config \"$W/alertgate.toml\" --events \"$W/first.jsonl\" --state \"$W/state.json\" > \"$W/first.out\"",
+        "cat \"$W/state.json\"",
+        "python -m alertgate run --config \"$W/alertgate.toml\" --events \"$W/second.jsonl\" --state \"$W/state.json\""
+      ],
+      "expected": "the second run prints no alert: state.json records gate-1 / intrusion at ts 1000, the new event is only 30 s later and the cooldown is 600 s; its stderr summary is \"alertgate: events=1 alerts=0 below_threshold=0 suppressed=1 skipped=0\"",
+      "actual": "state.json written by the first run does record gate-1 / intrusion at ts 1000, yet the second run prints {\"ts\": 1030, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.95} and its summary says alerts=1 suppressed=0. Running the same events file twice also re-emits every alert, the rewritten state file keeps only the pairs of the latest run, and a damaged state file is overwritten without any message, all from the same cause.",
+      "discovery_route": "commit-history",
+      "domain_specific": true,
+      "location": "alertgate/cli.py:107"
+    },
+    {
+      "id": "D4",
+      "feature": "F4",
+      "title": "A negative cooldown_seconds is accepted silently instead of being rejected with exit status 2",
+      "severity": "Minor",
+      "requirement_quote": "An unknown key, a threshold outside 0..1, a negative cooldown or a value that is not a number ends the run with a message on stderr and exit status 2.",
+      "requirement_location": "docs/behaviour.md, section \"Configuration\"",
+      "repro": [
+        "W=$(mktemp -d)",
+        "printf 'cooldown_seconds = -5\\n' > \"$W/alertgate.toml\"",
+        "echo '{\"ts\": 1000, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.95}' > \"$W/events.jsonl\"",
+        "python -m alertgate run --config \"$W/alertgate.toml\" --events \"$W/events.jsonl\" --state \"$W/state.json\"; echo \"exit=$?\""
+      ],
+      "expected": "a message on stderr that names cooldown_seconds, no alert on stdout, and \"exit=2\"",
+      "actual": "the alert is printed, stderr holds only the summary line, and the status line reads \"exit=0\". With a negative cooldown nothing is ever suppressed.",
+      "discovery_route": "ci-gap",
+      "domain_specific": false,
+      "location": "alertgate/config.py:38"
+    }
+  ],
+  "traps": [
+    {
+      "id": "T1",
+      "description": "An unknown configuration key stops the run with exit status 2. This is the documented behaviour, not a crash or an over-strict parser.",
+      "correct_behaviour": "stderr: \"alertgate: unknown configuration key(s): retries\"; nothing on stdout; exit status 2",
+      "check": "W=$(mktemp -d); printf 'threshold = 0.9\\nretries = 3\\n' > \"$W/alertgate.toml\"; : > \"$W/events.jsonl\"; python -m alertgate run --config \"$W/alertgate.toml\" --events \"$W/events.jsonl\" --state \"$W/state.json\"; echo \"exit=$?\""
+    },
+    {
+      "id": "T2",
+      "description": "A threshold of 1.5 stops the run with exit status 2 (the allowed range is 0..1). The range check works for the threshold even though the cooldown check does not.",
+      "correct_behaviour": "stderr: \"alertgate: threshold must be between 0 and 1, got 1.5\"; nothing on stdout; exit status 2",
+      "check": "W=$(mktemp -d); printf 'threshold = 1.5\\n' > \"$W/alertgate.toml\"; : > \"$W/events.jsonl\"; python -m alertgate run --config \"$W/alertgate.toml\" --events \"$W/events.jsonl\" --state \"$W/state.json\"; echo \"exit=$?\""
+    },
+    {
+      "id": "T3",
+      "description": "The same type on a different camera is not suppressed: the cooldown is per (camera, type) pair, so two intrusion alerts 10 s apart from two cameras are both correct.",
+      "correct_behaviour": "two alert lines on stdout, one for gate-1 and one for dock-2; summary alerts=2 suppressed=0",
+      "check": "W=$(mktemp -d); printf 'threshold = 0.80\\ncooldown_seconds = 300\\n' > \"$W/alertgate.toml\"; printf '%s\\n' '{\"ts\": 1000, \"camera\": \"gate-1\", \"type\": \"intrusion\", \"score\": 0.95}' '{\"ts\": 1010, \"camera\": \"dock-2\", \"type\": \"intrusion\", \"score\": 0.95}' > \"$W/events.jsonl\"; python -m alertgate run --config \"$W/alertgate.toml\" --events \"$W/events.jsonl\" --state \"$W/state.json\""
+    }
+  ],
+  "blocked": [
+    {
+      "id": "B1",
+      "description": "Delivery of alerts to the real external webhook given with --notify-url",
+      "why_not_runnable_locally": "The webhook is an external HTTP service. The repository names no real endpoint and holds no credentials, and a test environment has no route to one; only the client side (alertgate/cli.py, _deliver) is available. The unit tests replace urllib.request.urlopen with a fake.",
+      "acceptable_outcomes": [
+        "Reported as blocked or not run, with the reason that the external webhook is not reachable from the test environment",
+        "Exercised against a local stub HTTP server (for example http.server on 127.0.0.1) and reported as a stub run that does not prove delivery to the real service",
+        "Covered only through the mocked unit tests and reported as such, without claiming that real delivery was verified"
+      ]
+    }
+  ],
+  "history_signals": [
+    {
+      "commit_subject": "feat: persist cooldown state across restarts",
+      "why_it_matters": "States the requirement behind D3 (the state file is read on start and rewritten when the run finishes) and is the last point where the CLI loaded it. The restart scenario passes on this commit."
+    },
+    {
+      "commit_subject": "refactor: move state handling into its own module",
+      "why_it_matters": "Introduces D3. cli.py now builds a StateStore and saves it, but the load call and its error handling were dropped. The moved unit tests only cover StateStore itself, so nothing fails."
+    },
+    {
+      "commit_subject": "fix: ignore events older than the last alert",
+      "why_it_matters": "Introduces D2. The cooldown comparison was rewritten from abs(ts - last) < cooldown to elapsed <= cooldown; the commit adds a test for late events only, none for the boundary."
+    },
+    {
+      "commit_subject": "feat: read settings from a TOML config file",
+      "why_it_matters": "Introduces D4. The message promises that out-of-range values are rejected, but the bounds check is skipped for settings without an upper bound; tests cover unknown keys and the threshold range only."
+    },
+    {
+      "commit_subject": "feat: filter detection events by score threshold",
+      "why_it_matters": "D1 dates from the first commit: the message and the README say at or above while the code compares strictly; no test uses a score equal to the threshold."
+    },
+    {
+      "commit_subject": "docs: describe the filtering rules in docs/behaviour.md",
+      "why_it_matters": "Collects the requirements (boundaries, restart behaviour, validation, exit statuses) that the defects contradict; it is the source of expected results."
+    },
+    {
+      "commit_subject": "ci: run pytest on GitHub Actions and add pre-commit hooks",
+      "why_it_matters": "Shows that CI runs only the unit suite; nothing exercises the CLI across two runs, the boundaries or a real webhook."
+    },
+    {
+      "commit_subject": "feat: post alerts to a webhook with --notify-url",
+      "why_it_matters": "Adds the dependency on an external service (B1); its tests replace urlopen with a fake."
+    }
+  ],
+  "ci": {
+    "files": [
+      ".github/workflows/test.yml",
+      ".pre-commit-config.yaml"
+    ],
+    "what_ci_runs": [
+      "python -m pip install pytest",
+      "python -m pytest -q"
+    ],
+    "what_ci_does_not_cover": [
+      "a score exactly equal to the threshold (D1)",
+      "an event exactly cooldown_seconds after the last alert (D2)",
+      "two consecutive runs sharing one state file, i.e. a restart (D3); only StateStore round trips and the written file are tested",
+      "a negative cooldown_seconds (D4); validation tests cover unknown keys, the threshold range and value types",
+      "delivery to a real webhook (B1); urlopen is replaced by a fake in the tests",
+      "the pre-commit hooks (whitespace, YAML/TOML syntax, ruff) are not run by the workflow"
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: quiet-ko-02
+description: "이미 난 테스트 실패의 원인 분석 요청."
+tags: [trigger, quiet]
+runs: 3
+execution:
+  prompt: "test_token_refresh 왜 실패하는지 로그 보고 원인 알려줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: leaves-qa-skill-alone
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    min: 0
+    max: 0
+    arm: both

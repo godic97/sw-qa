@@ -1,0 +1,54 @@
+schema_version: "1.1"
+name: shopcart
+description: "money arithmetic, library plus command-line tool. Planted defects found from the docs, the commit history, the CI gaps and the code; correct behaviours that look suspicious; and parts that need an external service."
+tags: [behaviour]
+runs: 2
+execution:
+  prompt: "이 저장소 QA 진행해줘"
+  max_turns: 150
+  timeout_seconds: 2400
+  allowed_tools: [Skill, Read, Glob, Grep]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: finds-d1
+    type: llm
+    weight: 2
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: Tier discount is not applied when the subtotal is exactly 100,000 KRW. Expected: Exit 0 with Subtotal 100,000, Tier discount 10,000, Coupon 0, VAT 9,000, Total 99,000 KRW. Actual: Exit 0 with Subtotal 100,000, Tier discount 0, Coupon 0, VAT 10,000, Total 110,000 KRW: the customer is overcharged by 11,000 KRW. From 100,001 KRW upwards the discount is applied (100,001 gives Tier discount 10,000, Total 99,001). The library shows the same: shopcart.pricing.tier_discount(100000) returns 0. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d2
+    type: llm
+    weight: 2
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: A coupon is rejected as expired on its end date (regression of the fix 'accept coupons on their end date'). Expected: Exit 0 with Subtotal 50,000, Tier discount 0, Coupon 10,000, VAT 4,000, Total 44,000 KRW, because CHUSEOK10000 ends on 2026-09-30 and that day is still valid. Actual: Exit 2 with 'shopcart: error: coupon CHUSEOK10000 expired on 2026-09-30' on stderr and nothing on stdout. With --date 2026-09-29 the same order is priced correctly (Total 44,000). Every coupon is affected on its end date: AUTUMN30000 on 2026-10-31 and WELCOME5000 on 2027-12-31. In the library, shopcart.find_coupon('CHUSEOK10000', date(2026, 9, 30)) raises CouponError. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d3
+    type: llm
+    weight: 1
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: VAT rounds an exact half won to the even won (Python round) instead of half up. Expected: First order: VAT on 12,345 KRW is 1,234.5, half up gives VAT 1,235 and Total 13,580 KRW. Second order: Subtotal 100,050, Tier discount 10,005, amount before VAT 90,045, VAT 9,004.5 half up gives VAT 9,005 and Total 99,050 KRW. Actual: First order: VAT 1,234, Total 13,579 KRW. Second order: VAT 9,004, Total 99,049 KRW. The half won goes down whenever the amount before VAT ends in 5 and its tens digit is even (5, 25, 45, ... 12,345, 90,045); with an odd tens digit it goes up as documented (12,355 gives VAT 1,236). shopcart.pricing.vat(25) returns 2 instead of 3. The cause is round() applied to a float; for the same reason amounts above roughly 10^16 KRW, which need more than a thousand maximum-size lines, would also lose precision. That is the same line and the same fix, not a separate defect. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d4
+    type: llm
+    weight: 1
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: total exits with status 1 and a traceback when the items file is not valid JSON. Expected: Exit status 2, nothing on stdout and a single line on stderr such as 'shopcart: error: not valid JSON: ...', which is what 'python -m shopcart validate --items /tmp/d4.json' prints for the same file. README.md lists an items file that 'is not valid JSON' as invalid input. Actual: Exit status 1 and a multi-line Python traceback ending in 'json.decoder.JSONDecodeError: Expecting value: ...' on stderr. Every file the JSON decoder cannot read behaves this way with total: an empty file, CSV text, a UTF-8 BOM, bytes that are not UTF-8 (UnicodeDecodeError) and extremely deep nesting (RecursionError). These are one defect with one cause: _cmd_total reads the file without the handling _cmd_validate has, and main() only catches OrderError, CouponError and OSError. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: no-false-defects
+    type: llm
+    weight: 2
+    criteria: "These behaviours are correct: A quantity of 0 or a negative quantity makes total and validate stop with exit status 2 and an error message. A careless tester may report the non-zero exit as a failure, or expect such a line to be skipped or priced as 0. (correct: Exit status 2, nothing on stdout and exactly one line on stderr: 'shopcart: error: item 1: quantity must be a positive integer'. docs/pricing-rules.md, section 'Line items', says 'Quantities must be positive integers.' and README.md, section 'Exit status', defines exit status 2 with a one-line message for invalid input.); A coupon worth more than the amount due (WELCOME5000 on a 3,000 KRW order) is accepted and the order costs nothing. A careless tester may expect an error, a negative total, a minimum order value, or VAT on the original amount. (correct: Exit status 0 with Subtotal 3,000, Tier discount 0, Coupon 3,000 (the amount actually taken off), VAT 0, Total 0 KRW. docs/pricing-rules.md, section 'Coupons', says 'The total never goes below 0: a coupon worth more than the amount due brings it to 0, and the unused part of the coupon is lost.'). PASS if the final message does not report any of them as a defect or failure. FAIL if it reports at least one as a defect."
+  - name: read-commit-history
+    type: tool_used
+    tool: Bash
+    input_match: 'git (log|show)'
+  - name: ran-the-software
+    type: tool_used
+    tool: Bash
+    min: 5
+  - name: gives-verdict
+    type: regex
+    pattern: 'NO-GO'
+    arm: with-only
+  - name: reports-mutation-status
+    type: llm
+    weight: 1
+    arm: with-only
+    criteria: "PASS if the final message says whether mutation testing ran; here mutation-gate is not installed, so it should say mutation testing was not run or not measured. FAIL if it is not mentioned or if a mutation score is claimed."
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'

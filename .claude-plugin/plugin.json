@@ -1,0 +1,23 @@
+{
+  "name": "sw-qa",
+  "version": "0.1.0",
+  "description": "Software QA skill for AI coding agents: when asked to verify that software works, the agent finds what needs testing from the commit history, the CI pipeline and the code, runs standard and domain-specific QA cases against the running software, measures test adequacy with mutation-gate, and reports defects and a go/no-go verdict with evidence. Works in Claude Code, Codex and other agents that load Agent Skills. English and Korean.",
+  "author": {
+    "name": "godic97"
+  },
+  "repository": "https://github.com/godic97/sw-qa",
+  "license": "MIT",
+  "keywords": [
+    "qa",
+    "testing",
+    "verification",
+    "test-design",
+    "regression",
+    "bug-report",
+    "release",
+    "mutation-testing",
+    "korean",
+    "agent-skills",
+    "codex"
+  ]
+}

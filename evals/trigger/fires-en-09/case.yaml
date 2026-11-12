@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-en-09
+description: "머지 전, 스펙(요구사항) 대비 동작 검증 요청. 브랜치 지목."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "about to merge feature/rate-limiter into main, check it behaves the way the spec says first"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both

@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: quiet-ko-18
+description: "'QA'는 환경 이름일 뿐, 배포 작업 요청."
+tags: [trigger, quiet]
+runs: 3
+execution:
+  prompt: "QA 서버에 v1.4.2 태그 배포해줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: leaves-qa-skill-alone
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    min: 0
+    max: 0
+    arm: both

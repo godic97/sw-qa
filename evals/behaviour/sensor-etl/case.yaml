@@ -1,0 +1,54 @@
+schema_version: "1.1"
+name: sensor-etl
+description: "batch data pipeline. Planted defects found from the docs, the commit history, the CI gaps and the code; correct behaviours that look suspicious; and parts that need an external service."
+tags: [behaviour]
+runs: 2
+execution:
+  prompt: "제대로 동작하는지 테스트해줘"
+  max_turns: 150
+  timeout_seconds: 2400
+  allowed_tools: [Skill, Read, Glob, Grep]
+context:
+  scaffold_script: fixture.sh
+graders:
+  - name: finds-d1
+    type: llm
+    weight: 3
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: Readings are bucketed by their UTC date instead of the Asia/Seoul calendar day. Expected: daily/2026-09-02.json: 2026-09-01T15:30:00Z is 00:30 on 2 September in Asia/Seoul, so the reading belongs to the 2026-09-02 bucket (the README gives the same example with 15:00:00Z). Actual: daily/2026-09-01.json: the reading is filed under its UTC date. Every reading taken between 15:00Z and 23:59Z ends up in the file of the previous Seoul day, independent of the TZ setting of the machine. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d2
+    type: llm
+    weight: 3
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: A second ingest run on the same input double counts: every count in the daily files is added again. Expected: diff prints nothing and exits 0: after the second run daily/2026-09-01.json and daily/2026-09-02.json are byte-identical to the result of the first run. Actual: Both daily files change. Every count is doubled (2026-09-01: humidity-1 count 2 -> 4, temp-1 count 3 -> 6; 2026-09-02: both counts 2 -> 4) while min, max and avg stay the same; each further run adds the counts once more. Ingest merges the batch into the stored daily files without knowing that it has already been ingested. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d3
+    type: llm
+    weight: 2
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: Rejected rows are counted in the summary line but <out>/rejected.csv is never written. Expected: The summary line reports rejected=3 and /tmp/sensor-etl-d3/out/rejected.csv exists with the header file,line,reason,row followed by three lines: a.csv,3,unparseable timestamp,... / a.csv,4,non-numeric value,... / a.csv,5,wrong column count,... Actual: The summary line is 'ingested files=1 rows=4 accepted=1 rejected=3 days=1', but the output directory only contains daily/. rejected.csv does not exist (cat: No such file or directory). A rejected.csv left over from an earlier run is even removed. The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: finds-d4
+    type: llm
+    weight: 2
+    criteria: "PASS if the final message reports, as a defect or failed case, this behaviour: Non-ASCII characters are stripped from sensor names, so different Korean-named sensors are merged into one key. Expected: daily/2026-09-01.json has two keys: \"습도-1\" with {\"count\":1,\"min\":55,\"max\":55,\"avg\":55} and \"온도-1\" with {\"count\":1,\"min\":21.5,\"max\":21.5,\"avg\":21.5}. Actual: daily/2026-09-01.json has the single key \"-1\" with {\"count\":2,\"min\":21.5,\"max\":55,\"avg\":38.25}: the Korean characters are removed from both names and a temperature and a humidity sensor are aggregated together. Names that consist only of non-ASCII characters (온도, 습도) all end up under the empty key \"\". The wording may differ; the reported behaviour must be the same. FAIL if it is not reported, or is described as correct."
+  - name: no-false-defects
+    type: llm
+    weight: 2
+    criteria: "These behaviours are correct: An input directory that exists but holds no *.csv file makes ingest print \"no input files\" and exit 0 without creating the output directory. This can look like a silently swallowed error, but it is the documented behaviour (README sections \"Usage\" and \"Exit status\", CLI help, and the message of the commit \"fix: exit with status 2 when the input directory is missing\"). Only a missing directory is an error (exit 2). (correct: stdout is exactly \"no input files\", the exit status is 0 and nothing is written.); CRLF line endings. The history contains \"fix: accept CRLF line endings\" and the parser was touched again afterwards (\"refactor: let the parser tag rejected rows with their file\"), which invites the suspicion of a regression. CRLF input is still ingested completely: no row is rejected and the output equals the one for LF input. (correct: The summary line is \"ingested files=1 rows=2 accepted=2 rejected=0 days=1\" and daily/2026-09-01.json contains \"temp-1\": {\"count\":2,\"min\":21.5,\"max\":22,\"avg\":21.75}, exactly as for the same rows with LF endings.). PASS if the final message does not report any of them as a defect or failure. FAIL if it reports at least one as a defect."
+  - name: read-commit-history
+    type: tool_used
+    tool: Bash
+    input_match: 'git (log|show)'
+  - name: ran-the-software
+    type: tool_used
+    tool: Bash
+    min: 5
+  - name: gives-verdict
+    type: regex
+    pattern: 'NO-GO'
+    arm: with-only
+  - name: reports-mutation-status
+    type: llm
+    weight: 1
+    arm: with-only
+    criteria: "PASS if the final message says whether mutation testing ran; here mutation-gate is not installed, so it should say mutation testing was not run or not measured. FAIL if it is not mentioned or if a mutation score is claimed."
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'

@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-ko-06
+description: "머지 전 브랜치 검증, go/no-go 판단 요청."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "feat/refund-api 브랜치 머지해도 되는지 검증 좀 해줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both

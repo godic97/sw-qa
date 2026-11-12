@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: quiet-ko-06
+description: "지정한 명령 하나만 실행하면 끝나는 요청."
+tags: [trigger, quiet]
+runs: 3
+execution:
+  prompt: "pytest tests/test_auth.py -k expired 이것만 실행해줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: leaves-qa-skill-alone
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    min: 0
+    max: 0
+    arm: both

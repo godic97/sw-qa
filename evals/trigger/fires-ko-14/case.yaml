@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-ko-14
+description: "'QA'·'테스트' 단어 없이 실행 기반 동작 검증을 요청. 파일과 기능을 지목."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "src/api/orders.ts 고쳤어. 주문 생성/취소 실제로 돌려보고 이상 없는지 봐줘"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both

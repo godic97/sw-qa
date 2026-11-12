@@ -1,0 +1,16 @@
+schema_version: "1.1"
+name: fires-en-07
+description: "버그 수정이 실제로 동작하는지 재현 절차로 검증해 달라는 요청."
+tags: [trigger, fires]
+runs: 3
+execution:
+  prompt: "verify the session-timeout fix really works. repro steps are in the ticket"
+  max_turns: 3
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+graders:
+  - name: invokes-qa-skill
+    type: tool_used
+    tool: Skill
+    input_match: '"skill":\s*"(sw-qa:)?qa"'
+    arm: both
